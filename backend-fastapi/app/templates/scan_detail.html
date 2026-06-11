@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Scan #{{ job.id }} · Fund Safety Agent{% endblock %}
+{% block content %}
+<section class="hero compact">
+  <h1>Scan #{{ job.id }}</h1>
+  <p>{% if project %}<a href="/ui/projects/{{ project.id }}">{{ project.name }}</a> · {% endif %}<span class="status {{ job.status|lower }}">{{ job.status }}</span></p>
+  {% if job.status == 'FAILED' %}<div class="alert">{{ job.error }}</div>{% endif %}
+  {% if job.status in ['PENDING','RUNNING'] %}
+  <div id="progress-container" style="margin-top: 1.5rem;">
+    <p class="muted" id="progress-stage">{{ job.progress_stage or 'Initializing...' }}</p>
+    <progress id="progress-bar" value="{{ job.progress_percent }}" max="100"></progress>
+    <p class="muted" style="margin-top: 0.5rem;"><span id="progress-percent">{{ job.progress_percent }}</span>%</p>
+  </div>
+  {% endif %}
+</section>
+
+{% if job.status == 'COMPLETED' %}
+<section class="panel report-entry">
+  <h2>Fund Safety Assessment Report</h2>
+  <p class="muted">This scan has completed. Open the assessment summary report generated from <code>assessment_summary.md</code>.</p>
+  <p>
+    <a class="button secondary" href="{{ artifacts.assessment_report_route }}" target="_blank">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+      Open Assessment Report ↗
+    </a>
+  </p>
+</section>
+
+<section class="panel">
+  <h2>Ask Fund Safety Agent</h2>
+  <p class="muted">Have questions about this assessment? Ask the AI agent in a continuous conversation.</p>
+  <p>
+    <a class="button" href="/ui/scans/{{ job.id }}/chat">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      Open Chat
+    </a>
+  </p>
+</section>
+{% endif %}
+
+{% if job.status in ['PENDING', 'RUNNING'] %}
+<script>
+(function pollScanStatus() {
+  const scanId = {{ job.id }};
+
+  function updateProgress() {
+    fetch(`/ui/scans/${scanId}/status`, {
+      credentials: "same-origin"
+    })
+    .then(r => r.json())
+    .then(data => {
+      document.getElementById('progress-percent').textContent = data.progress_percent;
+      document.getElementById('progress-bar').value = data.progress_percent;
+      document.getElementById('progress-stage').textContent = data.progress_stage || 'Processing...';
+
+      if (data.status === 'COMPLETED' || data.status === 'FAILED') {
+        location.reload();
+      } else {
+        setTimeout(updateProgress, 1000);
+      }
+    })
+    .catch(err => setTimeout(updateProgress, 2000));
+  }
+
+  updateProgress();
+})();
+</script>
+{% endif %}
+{% endblock %}

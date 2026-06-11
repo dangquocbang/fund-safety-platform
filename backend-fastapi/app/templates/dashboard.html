@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Dashboard · Fund Safety Agent{% endblock %}
+{% block content %}
+<section class="hero">
+  <h1>Zalopay Fund Safety Dashboard</h1>
+  <p>Upload real source code ZIP, build method/API index, discovery depth=2, assess R1-R11, and review fund-risk findings.</p>
+  {% if user.role == 'admin' %}
+  <p><a href="/ui/admin/dashboard" class="button secondary">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+    Admin Dashboard
+  </a></p>
+  {% endif %}
+</section>
+
+<section class="metrics grid-4">
+  <div class="metric"><span>Projects</span><strong>{{ dashboard.project_count }}</strong></div>
+  <div class="metric"><span>Scans</span><strong>{{ dashboard.scan_count }}</strong></div>
+  <div class="metric"><span>Findings</span><strong>{{ dashboard.finding_count }}</strong></div>
+  <div class="metric"><span>Open</span><strong>{{ dashboard.open_count }}</strong></div>
+</section>
+
+<section class="panel">
+  <h2>Create Project</h2>
+  <form action="/ui/projects" method="post" class="inline-form">
+    <input name="name" placeholder="wallet-service" required />
+    <select name="language">
+      <option value="auto">Auto</option>
+      <option value="java">Java</option>
+      <option value="go">Go</option>
+    </select>
+    <input name="repo_url" placeholder="Git URL optional" />
+    <label class="check"><input type="checkbox" name="fund_critical" checked /> Fund critical</label>
+    <button>Create</button>
+  </form>
+</section>
+
+<section class="grid-2">
+  <div class="panel">
+    <h2>Projects</h2>
+    <table>
+      <thead><tr><th>Name</th><th>Language</th><th>Created</th></tr></thead>
+      <tbody>
+      {% for p in projects %}
+        <tr><td><a href="/ui/projects/{{ p.id }}">{{ p.name }}</a></td><td>{{ p.language }}</td><td>{{ p.created_at.strftime('%Y-%m-%d %H:%M') }}</td></tr>
+      {% else %}
+        <tr><td colspan="3" class="muted">No projects yet.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <h2>Recent Scans</h2>
+    <table>
+      <thead><tr><th>ID</th><th>Status</th><th>Created</th></tr></thead>
+      <tbody>
+      {% for scan in scans %}
+        <tr><td><a href="/ui/scans/{{ scan.id }}">#{{ scan.id }}</a></td><td><span class="status {{ scan.status|lower }}">{{ scan.status }}</span></td><td>{{ scan.created_at.strftime('%Y-%m-%d %H:%M') }}</td></tr>
+      {% else %}
+        <tr><td colspan="3" class="muted">No scans yet.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,11 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: backend-fastapi/Dockerfile
+    env_file: .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend-fastapi/data:/app/data
+      - ./backend-fastapi/uploads:/app/uploads

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{% block title %}Fund Safety Agent{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <a class="brand" href="/ui/dashboard">Zalopay Fund Safety Agent</a>
+      <span class="badge">Claw (a) thon</span>
+    </div>
+    {% if user %}
+    <nav>
+      <span>{{ user.full_name }} · {{ user.role }}</span>
+      <a href="/logout">Logout</a>
+    </nav>
+    {% endif %}
+  </header>
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

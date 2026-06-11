@@ -1,0 +1,17 @@
+app:
+  name: Fund Safety Platform
+  version: 1.0.0-phase1-config-driven
+
+storage:
+  data_dir: data
+  upload_dir: uploads
+  report_dir: uploads
+  scan_storage_dir: uploads
+  database_url: sqlite:///data/fund_safety.db
+  max_upload_size_mb: 500
+
+security:
+  jwt_secret: fund-safety-phase1-demo-secret-change-me-32bytes
+  jwt_algorithm: HS256
+  jwt_exp_minutes: 480
+  seed_demo_users: true

@@ -1,0 +1,17 @@
+fund_methods:
+  - Transfer
+  - Debit
+  - Credit
+  - Charge
+  - Capture
+  - Payout
+  - Refund
+  - Reversal
+  - Settle
+
+external_clients:
+  - bankClient
+  - walletClient
+  - ledgerClient
+  - partnerClient
+  - paymentGateway

@@ -1,0 +1,57 @@
+# Multi-provider LLM configuration for the fixed pipeline:
+# Upload ZIP -> Python build_index -> Discovery Provider -> targets.yml
+# -> Assessment Provider -> assessment.json + idempotency_audit_summary.md -> UI matrix
+# -> Chat/Answer Provider -> detailed explanations in chat interface
+
+# Global switch. Keep false for fully local/mock demo; set true to call real providers.
+enabled: true
+
+discovery:
+  enabled: true
+  provider: ollama          # mock | claude_code | anthropic_api | ollama
+  model: claude-sonnet-4-5
+  depth: 2
+  max_targets: 80
+
+assessment:
+  enabled: true
+  provider: ollama          # mock | junie | claude_code | anthropic_api | openai | ollama
+  model: claude-sonnet-4-5
+  batch_size: 4
+  max_targets: 80
+
+# Chat/Answer stage - for detailed explanations in chat interface
+chat:
+  enabled: true
+  provider: ollama          # mock | claude_code | junie | anthropic_api | openai | ollama
+  model: qwen2.5:14b        # Must match an available model in Ollama
+  batch_size: 1
+  max_targets: 1
+
+providers:
+  claude_code:
+    binary: claude
+    args: ["-p"]
+
+  junie:
+    binary: junie
+    args: ["-p"]
+
+  anthropic_api:
+    api_key: ""
+    api_key_env: ANTHROPIC_API_KEY
+    base_url: https://api.anthropic.com
+    version: "2023-06-01"
+
+  openai:
+    api_key: ""
+    api_key_env: OPENAI_API_KEY
+    base_url: https://api.openai.com/v1
+    model: gpt-4.1
+
+  ollama:
+    base_url: http://localhost:11434
+    model: qwen2.5-coder:14b
+
+timeout_seconds: 600
+max_chars: 120000

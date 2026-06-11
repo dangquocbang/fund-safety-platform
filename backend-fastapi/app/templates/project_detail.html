@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}{{ project.name }} · Fund Safety Agent{% endblock %}
+{% block content %}
+<section class="hero compact">
+  <h1>{{ project.name }}</h1>
+  <p>Language: {{ project.language }} · Fund critical: {{ project.fund_critical }}</p>
+</section>
+
+<section class="panel">
+  <h2>Upload real service source ZIP</h2>
+  <form action="/ui/projects/{{ project.id }}/scan" method="post" enctype="multipart/form-data" class="inline-form upload-form">
+    <input type="file" name="file" accept=".zip" required />
+    <button>Start Scan</button>
+  </form>
+  <p class="muted">Input should be the full source code ZIP of one Java/Golang service.</p>
+</section>
+
+<section class="panel">
+  <h2>Scan History</h2>
+  <table>
+    <thead><tr><th>ID</th><th>Status</th><th>Created</th><th>Finished</th><th>Report</th></tr></thead>
+    <tbody>
+    {% for scan in scans %}
+      <tr>
+        <td><a href="/ui/scans/{{ scan.id }}">#{{ scan.id }}</a></td>
+        <td><span class="status {{ scan.status|lower }}">{{ scan.status }}</span></td>
+        <td>{{ scan.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+        <td>{% if scan.finished_at %}{{ scan.finished_at.strftime('%Y-%m-%d %H:%M') }}{% else %}—{% endif %}</td>
+        <td>
+          {% if scan.status == 'COMPLETED' %}
+            <a class="button secondary" href="/ui/scans/{{ scan.id }}/assessment-report" target="_blank">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              Open Report ↗
+            </a>
+          {% else %}
+            —
+          {% endif %}
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="muted">No scans yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

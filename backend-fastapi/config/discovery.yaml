@@ -1,0 +1,85 @@
+# Discovery controls the index-first target selection stage.
+#
+# entrypoint_mode: true  → only select HTTP/gRPC handlers and Kafka/RabbitMQ consumers.
+#                          Falls back to hint-based mode if no entrypoints are found.
+# entrypoint_mode: false → legacy hint-based discovery (fund keyword matching).
+entrypoint_mode: true
+
+depth: 2
+
+ignore_path_contains:
+  - /test/
+  - /tests/
+  - /mock/
+  - /mocks/
+  - /dto/
+  - /entity/
+  - /model/
+  - /config/
+
+include_name_contains:
+  - pay
+  - payment
+  - transfer
+  - trans
+  - submit
+  - confirm
+  - capture
+  - refund
+  - reversal
+  - callback
+  - retry
+  - order
+  - settle
+
+exclude_methods:
+  # Protobuf generated methods
+  - String
+  - Reset
+  - ProtoMessage
+  - ProtoReflect
+  - Descriptor
+  - ValidateAll
+  # Go interface implementations
+  - MarshalJSON
+  - UnmarshalJSON
+  - MarshalXML
+  - UnmarshalXML
+  - MarshalYAML
+  - UnmarshalYAML
+  - Error
+  - Is
+  - Unwrap
+  # Enum helpers
+  - Enum
+  - Number
+  - EnumDescriptor
+  # Other framework boilerplate
+  - GoString
+  - XXX_*
+  - SetDefaults
+  - Clone
+  - clone*
+  - init*
+  - get*
+  - set*
+  # Lifecycle / infrastructure methods (no fund logic)
+  - Start
+  - start
+  - Shutdown
+  - shutdown
+  - Stop
+  - stop
+  - Close
+  - close
+  # Validation and query methods (read-only / non-fund)
+  - validate*
+  - Validate*
+  - Query
+  - query
+  - query*
+  # DB row-to-domain mapper methods (not fund logic)
+  - model
+  - model*
+  - Model
+  - Model*

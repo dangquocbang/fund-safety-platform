@@ -1,0 +1,9 @@
+knowledge_graph:
+  enabled: true
+
+risk_score:
+  missing_idempotency: 30
+  missing_compensation: 25
+  retry_risk: 15
+  replay_risk: 15
+  ordering_risk: 15

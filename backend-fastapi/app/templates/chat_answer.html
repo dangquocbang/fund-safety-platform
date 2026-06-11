@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Agent Answer · Fund Safety Agent{% endblock %}
+{% block content %}
+<section class="panel">
+  <h1>Fund Safety Agent Answer</h1>
+  <pre class="answer">{{ answer }}</pre>
+  <h2>Supporting Findings</h2>
+  {% for f in supporting_findings %}
+    <div class="finding {{ (f.severity or 'low')|lower }}">
+      <strong>{{ f.severity }} · {{ f.title }}</strong>
+      <p><code>{{ f.method_name }}</code> — {{ f.file_path }}:{{ f.start_line }}</p>
+    </div>
+  {% else %}<p class="muted">No supporting findings.</p>{% endfor %}
+  <p><a href="javascript:history.back()">Back</a></p>
+</section>
+{% endblock %}

@@ -1,0 +1,13 @@
+Read files in this order before making code changes:
+
+1. AGENTS.md
+2. .ai/memory/project_state.md
+3. .ai/memory/architecture.md
+4. .ai/tasks/current_task.md
+5. docs/rbac.md
+6. backend-fastapi/config/*.yaml
+7. backend-fastapi/prompts/**/*.md
+8. Relevant source code under backend-fastapi/app/
+
+When implementing a task, respect architecture decisions first, then the current task.
+If .ai/tasks/current_task.md conflicts with AGENTS.md or .ai/memory/architecture.md, stop and report the conflict.

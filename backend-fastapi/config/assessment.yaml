@@ -1,0 +1,35 @@
+# R1-R10 can be enabled/disabled without code changes.
+high_risk_only_llm: true
+max_llm_targets: 30
+
+rules:
+  R1:
+    enabled: true
+    title: Idempotency Boundary Defined
+  R2:
+    enabled: true
+    title: Unique Business Intent Defined
+  R3:
+    enabled: true
+    title: Duplicate Detection Exists
+  R4:
+    enabled: true
+    title: In-progress Concurrency Handling
+  R5:
+    enabled: true
+    title: State Machine Safe for Retry
+  R6:
+    enabled: true
+    title: Timeout & Partial Execution Recovery
+  R7:
+    enabled: true
+    title: External Side-effect Guarded
+  R8:
+    enabled: true
+    title: Persistence & Side-effect Ordering Safe
+  R9:
+    enabled: true
+    title: Response Consistency
+  R10:
+    enabled: true
+    title: Compensate / Reversal Safeguard

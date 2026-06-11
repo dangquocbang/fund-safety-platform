@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Login · Zalopay Fund Safety Agent{% endblock %}
+{% block content %}
+<section class="login-card">
+  <h1>Zalopay Fund Safety Agent</h1>
+  <p class="muted">Sign in to your account.</p>
+  {% if error %}<div class="alert">{{ error }}</div>{% endif %}
+  <form method="post" action="/login" class="form">
+    <label for="email">Email</label>
+    <input id="email" name="email" value="admin@fundsafe.local" required />
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" value="admin123" required />
+    <button type="submit">Login</button>
+  </form>
+  <div class="demo-users">
+    <strong>Demo users</strong><br />
+    admin@fundsafe.local / admin123<br />
+    architect@fundsafe.local / architect123<br />
+    dev@fundsafe.local / dev123<br />
+    viewer@fundsafe.local / viewer123
+  </div>
+</section>
+{% endblock %}
