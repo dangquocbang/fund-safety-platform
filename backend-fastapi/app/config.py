@@ -13,6 +13,38 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 CONFIG_DIR = BACKEND_DIR / "config"
 
 
+def _load_dotenv(path: Path) -> None:
+    """Populate os.environ from a .env file without overriding existing vars.
+
+    Values already present in the real environment win; the .env file only
+    fills in keys that are not yet set. Must run before any os.getenv() call
+    below so secrets like api_key_env entries resolve correctly.
+    """
+    if not path.exists():
+        return
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :].strip()
+        key, sep, value = line.partition("=")
+        if not sep:
+            continue
+        key = key.strip()
+        value = value.strip()
+        if (value.startswith('"') and value.endswith('"')) or (
+            value.startswith("'") and value.endswith("'")
+        ):
+            value = value[1:-1]
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+# Repo-root .env is loaded as a fallback for environment variables.
+_load_dotenv(BACKEND_DIR.parent / ".env")
+
+
 def _load_yaml(name: str) -> dict[str, Any]:
     path = CONFIG_DIR / name
     if not path.exists():

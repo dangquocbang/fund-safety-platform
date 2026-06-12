@@ -8,23 +8,23 @@ enabled: true
 
 discovery:
   enabled: true
-  provider: ollama          # mock | claude_code | anthropic_api | ollama
-  model: claude-sonnet-4-5
+  provider: openai          # mock | claude_code | anthropic_api | ollama
+  model: openai/gpt-5
   depth: 2
   max_targets: 80
 
 assessment:
   enabled: true
-  provider: ollama          # mock | junie | claude_code | anthropic_api | openai | ollama
-  model: claude-sonnet-4-5
+  provider: openai          # mock | junie | claude_code | anthropic_api | openai | ollama
+  model: openai/gpt-5
   batch_size: 4
   max_targets: 80
 
 # Chat/Answer stage - for detailed explanations in chat interface
 chat:
   enabled: true
-  provider: ollama          # mock | claude_code | junie | anthropic_api | openai | ollama
-  model: qwen2.5:14b        # Must match an available model in Ollama
+  provider: openai          # mock | claude_code | junie | anthropic_api | openai | ollama
+  model: openai/gpt-5       # Must match an available model in Ollama
   batch_size: 1
   max_targets: 1
 
@@ -45,9 +45,9 @@ providers:
 
   openai:
     api_key: ""
-    api_key_env: OPENAI_API_KEY
-    base_url: https://api.openai.com/v1
-    model: gpt-4.1
+    api_key_env: "OPEN_API_KEY"
+    base_url: https://maas-llm-aiplatform-hcm.api.vngcloud.vn/v1
+    model: minimax/minimax-m2.5
 
   ollama:
     base_url: http://localhost:11434

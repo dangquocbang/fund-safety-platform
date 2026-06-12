@@ -1,0 +1,11 @@
+.agentbase/
+.env
+.env.*
+.git/
+.greennode.json
+**/__pycache__/
+**/*.pyc
+backend-fastapi/data/
+backend-fastapi/scan_storage/
+backend-fastapi/uploads/
+greennode-agentbase-skills/
