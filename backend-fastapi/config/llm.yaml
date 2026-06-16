@@ -45,7 +45,7 @@ providers:
 
   openai:
     api_key: ""
-    api_key_env: "OPEN_API_KEY"
+    api_key_env: "OPENAI_API_KEY"
     base_url: https://maas-llm-aiplatform-hcm.api.vngcloud.vn/v1
     model: minimax/minimax-m2.5
 

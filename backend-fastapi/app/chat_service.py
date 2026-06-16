@@ -196,11 +196,29 @@ def find_function_context(assessment: dict, function_name: str, rule_id: str | N
     }
 
 
+def _format_conversation_history(conversation_history: list | None, max_turns: int = 8) -> str:
+    """Render prior turns into a transcript block for multi-turn context."""
+    if not conversation_history:
+        return ""
+    lines = []
+    for msg in conversation_history[-max_turns:]:
+        role = (msg.get("role") or "").lower()
+        content = (msg.get("content") or "").strip()
+        if not content:
+            continue
+        speaker = "User" if role == "user" else "Assistant"
+        lines.append(f"{speaker}: {content}")
+    if not lines:
+        return ""
+    return "## Conversation So Far\n" + "\n".join(lines) + "\n"
+
+
 def reason_about_function(
     function_context: dict,
     original_question: str,
     rule_id: str | None = None,
     llm_client: LLMClient | None = None,
+    conversation_history: list | None = None,
 ) -> str:
     """
     Call LLM to reason about function issue with focused prompt.
@@ -237,6 +255,8 @@ Fix: {rr.get('fix', 'N/A')}
 
     code_excerpt = function_context.get("source_code", "")[:1000]
 
+    history_section = _format_conversation_history(conversation_history)
+
     prompt = f"""You are a Fund Safety Platform AI Assistant. Analyze this function and answer the user's question.
 
 ## Function
@@ -259,6 +279,7 @@ Priority: {function_context.get('priority')}
 - Idempotency markers: {function_context.get('has_idempotency_signal')}
 - Fund operations: {function_context.get('has_external_fund_signal')}
 
+{history_section}
 ## User Question
 {original_question}
 
@@ -269,11 +290,9 @@ Provide a detailed explanation addressing the user's question. Include:
 Keep the response concise but thorough.
 """
 
-    try:
-        response = llm_client.generate(prompt)
-        return response
-    except Exception:
-        return _fallback_function_explanation(function_context, rule_id)
+    # Let exceptions propagate to the caller so the real error can be shown to
+    # the user instead of being masked by a generic deterministic fallback.
+    return llm_client.generate(prompt)
 
 
 def _fallback_function_explanation(function_context: dict, rule_id: str | None = None) -> str:
@@ -342,6 +361,7 @@ def chat_with_reasoning(
     assessment: dict,
     question: str,
     llm_client: LLMClient | None = None,
+    conversation_history: list | None = None,
 ) -> dict:
     """
     Main chat handler with semantic matching and clarification.
@@ -359,7 +379,31 @@ def chat_with_reasoning(
     if intent["is_specific_query"] and intent["function_name"] and intent["confidence"] >= 100:
         context = find_function_context(assessment, intent["function_name"], intent["rule_id"])
         if context:
-            answer = reason_about_function(context, question, intent["rule_id"], llm_client)
+            try:
+                answer = reason_about_function(
+                    context, question, intent["rule_id"], llm_client, conversation_history
+                )
+            except Exception as exc:
+                # The model call failed at runtime (bad API key, network/timeout,
+                # CLI error, etc.). Surface the real error instead of returning a
+                # generic fallback that users mistake for a real answer.
+                provider = (
+                    llm_client.config.provider if llm_client and llm_client.config else "unknown"
+                )
+                print(f"[CHAT ERROR] LLM generate failed (provider={provider}): {exc!r}")
+                return {
+                    "answer": (
+                        f"⚠️ Unable to get a response from the AI model "
+                        f"(provider: `{provider}`).\n\n"
+                        f"**Error:** {exc}\n\n"
+                        f"Please check the LLM configuration or try again."
+                    ),
+                    "query_type": "error",
+                    "function_name": intent["function_name"],
+                    "rule_id": intent["rule_id"],
+                    "error": str(exc),
+                    "confidence": 0,
+                }
             return {
                 "answer": answer,
                 "query_type": "function_deep_dive",

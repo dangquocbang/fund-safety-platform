@@ -31,6 +31,34 @@ class ChatSession {
         // Enable input and set initial button state
         this.chatInput.disabled = false;
         this.updateInputState();
+
+        // Load persisted chat history for this scan
+        this.loadHistory();
+    }
+
+    async loadHistory() {
+        try {
+            const response = await fetch(`/ui/api/chats/${this.scanId}/messages`, {
+                method: "GET",
+                credentials: "same-origin",
+            });
+            if (!response.ok) return;
+            const data = await response.json();
+            const history = (data && data.messages) || [];
+            if (history.length === 0) return;
+            this.messages = history.map((m) => ({
+                role: m.role,
+                content: m.content,
+                query_type: m.query_type,
+                function_name: m.function_name,
+                rule_id: m.rule_id,
+                confidence: m.confidence || 0,
+            }));
+            this.renderMessages();
+            this.scrollToBottom();
+        } catch (error) {
+            console.error("Failed to load chat history:", error);
+        }
     }
 
     populateExamples() {
@@ -103,7 +131,14 @@ class ChatSession {
             });
 
             if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
+                let detail = `HTTP ${response.status}`;
+                try {
+                    const errBody = await response.json();
+                    if (errBody && errBody.detail) detail = errBody.detail;
+                } catch (_) {
+                    /* response had no JSON body */
+                }
+                throw new Error(detail);
             }
 
             const aiResponse = await response.json();
@@ -184,6 +219,9 @@ class ChatSession {
     createMessageElement(msg) {
         const div = document.createElement("div");
         div.className = `message ${msg.role}-message`;
+        if (msg.query_type === "error") {
+            div.classList.add("error-message");
+        }
 
         if (msg.role === "user") {
             div.innerHTML = `
@@ -257,12 +295,19 @@ class ChatSession {
         }
     }
 
-    clearChat() {
-        if (confirm("Clear chat history? This action cannot be undone.")) {
-            this.messages = [];
-            this.renderMessages();
-            this.chatInput.focus();
+    async clearChat() {
+        if (!confirm("Clear chat history? This action cannot be undone.")) return;
+        try {
+            await fetch(`/ui/api/chats/${this.scanId}/messages`, {
+                method: "DELETE",
+                credentials: "same-origin",
+            });
+        } catch (error) {
+            console.error("Failed to clear chat history:", error);
         }
+        this.messages = [];
+        this.renderMessages();
+        this.chatInput.focus();
     }
 
     escapeHtml(text) {

@@ -205,6 +205,19 @@ body {
     color: #a78bfa;
 }
 
+.query-type.error {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--bad);
+}
+
+/* Error message body */
+.assistant-message.error-message .message-content {
+    border-left: 3px solid var(--bad);
+    padding-left: 10px;
+    color: var(--bad);
+    white-space: pre-wrap;
+}
+
 .confidence {
     background: rgba(255, 255, 255, 0.08);
     padding: 2px 8px;
