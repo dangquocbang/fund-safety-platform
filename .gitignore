@@ -1,3 +1,12 @@
 .greennode.json
 .agentbase/
 .env
+
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Python bytecode caches
+__pycache__/
+*.py[cod]
