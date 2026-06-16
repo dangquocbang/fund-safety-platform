@@ -6,7 +6,7 @@ and fund-loss risk in Java / Go services.
 Stack: FastAPI + Jinja2 + SQLite. No Node.js, no npm, no Postgres.
 
 
-![Landing Page](assets/landing-page.png)
+![Landing Page](assets/landing-page.gif)
 
 ## Demo
 
