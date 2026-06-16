@@ -2,9 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [1.1.0] - 2026-06-17
 
 ### Added
 - **Chat history persistence** — chat turns are now stored server-side
@@ -40,3 +43,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Chore
 - Stopped tracking `.venv/` and `__pycache__/` in git and added them to
   `.gitignore` (the committed `.venv` was a broken cross-machine symlink tree).
+
+[Unreleased]: https://github.com/dangquocbang/fund-safety-platform/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/dangquocbang/fund-safety-platform/releases/tag/v1.1.0

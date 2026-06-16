@@ -1,6 +1,6 @@
 app:
   name: Fund Safety Platform
-  version: 1.0.0-phase1-config-driven
+  version: 1.1.0
 
 storage:
   data_dir: data
