@@ -498,12 +498,14 @@ def ui_dashboard(request: Request, s: Session = Depends(get_session)):
     dashboard = risk_dashboard(user, s)
     scans_all = s.exec(select(ScanJob).order_by(ScanJob.created_at.desc()).limit(20)).all()
     scans_visible = [j for j in scans_all if can_view_scan(user, j, s)]
+    project_names = {p.id: p.name for p in s.exec(select(Project)).all()}
     return templates.TemplateResponse(request, "dashboard.html", {
         "request": request,
         "user": user,
         "projects": visible_projects,
         "dashboard": dashboard,
         "scans": scans_visible,
+        "project_names": project_names,
     })
 
 

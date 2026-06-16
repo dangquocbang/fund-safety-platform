@@ -17,6 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   vendored, offline copy of highlight.js (github-dark theme), with language
   auto-detection when the fence has no language hint. highlight.js escapes its
   own output, keeping rendering XSS-safe.
+- **Dashboard polish.** Consistent section spacing; the redundant "Open" metric
+  card (always equal to Findings) was replaced with a red "Critical" card; and
+  Recent Scans gained a Project column so each scan shows which project it ran
+  against.
+- **Role-aware Create Project.** The dashboard's Create Project form (inputs +
+  button) is now disabled for read-only `viewer` accounts, with a short note
+  explaining why — matching the backend, which already rejects creation by
+  viewers.
 
 ### Changed
 - **Chat is now LLM-first.** When a provider is enabled, the model answers every
