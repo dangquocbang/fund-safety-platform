@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Markdown rendering in chat.** Assistant replies (which are markdown) now
+  render as formatted HTML — headings, bold/italic, inline & fenced code,
+  ordered/unordered lists, tables, and links — instead of showing raw `##`,
+  `**`, and `|` characters. Rendering escapes HTML first and only allows safe
+  link schemes, so model output can't inject markup. User messages stay plain.
+- **Syntax highlighting for code blocks.** Fenced code is colorized with a
+  vendored, offline copy of highlight.js (github-dark theme), with language
+  auto-detection when the fence has no language hint. highlight.js escapes its
+  own output, keeping rendering XSS-safe.
+
+### Changed
+- **Chat is now LLM-first.** When a provider is enabled, the model answers every
+  question grounded in the full audit context (audited functions, R1–R11
+  statuses, risks, fixes, scores) plus the focused function's source when one is
+  clearly referenced — instead of the old keyword router that only reached the
+  model on an exact "function + rule" match and otherwise returned canned
+  clarification/generic text. The deterministic router is kept only as the
+  fallback when the LLM is intentionally disabled (`mock`/`off`).
+- **Out-of-scope guard.** A dedicated chat system prompt restricts the assistant
+  to this project's fund-safety audit: it grounds answers only in the provided
+  audit data, says so when a named function wasn't audited, politely declines
+  unrelated questions, and replies in the user's language.
+
 ## [1.1.0] - 2026-06-17
 
 ### Added

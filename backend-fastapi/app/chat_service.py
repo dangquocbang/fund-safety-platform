@@ -357,55 +357,173 @@ def ask_user_to_clarify(candidates: list[dict]) -> dict:
     }
 
 
+CHAT_SYSTEM_PROMPT = (
+    "You are the Fund Safety Platform assistant for ONE specific scanned project. "
+    "Your job is to help the user understand THIS project's fund-safety audit: its "
+    "functions, the R1-R11 idempotency / fund-safety rules, findings, risks, scores, "
+    "and remediation steps. "
+    "Ground every answer ONLY in the audit data provided in the prompt — never invent "
+    "functions, rules, code, or findings that are not present. If the audit data does "
+    "not contain the answer (for example the user names a function that was not "
+    "audited), say so plainly and point them to what IS available. "
+    "If the user asks anything unrelated to this project or its fund-safety audit "
+    "(general knowledge, other software, world facts, casual chit-chat, etc.), politely "
+    "decline in one short sentence and remind them you only answer questions relevant "
+    "to this project's fund-safety audit. "
+    "Always reply in the same language the user wrote in. Be concise and concrete, and "
+    "cite function names, rule IDs (R1-R11), and file:line where relevant."
+)
+
+
+def _format_audit_context(assessment: dict, max_targets: int = 25) -> str:
+    """Compact, model-friendly summary of the whole audit for chat grounding."""
+    project = assessment.get("project") or "this project"
+    summary = assessment.get("summary", {}) or {}
+    tas = assessment.get("target_assessments", []) or []
+    risk_scores = assessment.get("risk_scores", []) or []
+
+    lines = [f"Project: {project}"]
+    by_sev = summary.get("by_severity") or {}
+    if by_sev:
+        lines.append("Findings by severity: " + ", ".join(f"{k}={v}" for k, v in by_sev.items() if v))
+    lines.append(f"Audited functions ({len(tas)}):")
+    for ta in tas[:max_targets]:
+        name = ta.get("method") or ta.get("method_id")
+        cls = ta.get("class_name")
+        label = f"{cls}.{name}" if cls else name
+        loc = f"{ta.get('file_path')}:{ta.get('start_line')}"
+        lines.append(
+            f"- {label} [{loc}] priority={ta.get('priority')} "
+            f"overall={ta.get('overall_status')} score={ta.get('score')}"
+        )
+        for c in ta.get("criteria", []) or []:
+            if c.get("status") in ("FAIL", "PARTIAL"):
+                seg = f"    {c.get('id')} {c.get('status')}"
+                risk = (c.get("risk") or "").strip()
+                fix = (c.get("fix") or "").strip()
+                if risk:
+                    seg += f": {risk}"
+                if fix:
+                    seg += f" | fix: {fix}"
+                lines.append(seg)
+    if len(tas) > max_targets:
+        lines.append(f"... and {len(tas) - max_targets} more audited functions")
+    if risk_scores:
+        lines.append(
+            "Service risk scores: "
+            + ", ".join(f"{r.get('service')}={r.get('score')}/100" for r in risk_scores[:8])
+        )
+    return "\n".join(lines)
+
+
+def answer_with_llm(
+    assessment: dict,
+    question: str,
+    llm_client: LLMClient,
+    conversation_history: list | None = None,
+    function_context: dict | None = None,
+) -> str:
+    """LLM-first chat: answer any question grounded in the full audit context."""
+    audit_context = _format_audit_context(assessment)
+    history_section = _format_conversation_history(conversation_history)
+
+    function_section = ""
+    if function_context:
+        evidence = function_context.get("all_evidence") or []
+        ev_lines = "\n".join(
+            f"- {e.get('rule')}: {e.get('status')} - {e.get('risk', '')}" for e in evidence[:6]
+        )
+        code = (function_context.get("source_code") or "")[:1500]
+        function_section = f"""
+## Focused Function (the user most likely refers to this)
+Name: {function_context.get('method_name')}
+Class: {function_context.get('class_name', 'N/A')}
+File: {function_context.get('file_path')}:{function_context.get('start_line')}
+Priority: {function_context.get('priority')}
+Signals: retry={function_context.get('has_retry_signal')}, idempotency={function_context.get('has_idempotency_signal')}, fund={function_context.get('has_external_fund_signal')}
+Failing/partial criteria:
+{ev_lines or '- (none recorded)'}
+
+Source (excerpt):
+```
+{code}
+```
+"""
+
+    prompt = f"""## Fund-Safety Audit Data for This Project
+{audit_context}
+{function_section}
+{history_section}
+## User Question
+{question}
+
+Answer using ONLY the audit data above. If the question is not about this project or
+its fund-safety audit, politely decline as instructed in your system role.
+"""
+    return llm_client.generate(prompt, system=CHAT_SYSTEM_PROMPT)
+
+
 def chat_with_reasoning(
     assessment: dict,
     question: str,
     llm_client: LLMClient | None = None,
     conversation_history: list | None = None,
 ) -> dict:
-    """
-    Main chat handler with semantic matching and clarification.
+    """Main chat handler.
 
-    Routes:
-    1. Exact match + rule/keyword → function_deep_dive
-    2. Exact match only → ask for specifics
-    3. Multiple candidates → ask user to clarify
-    4. No match → generic response
+    LLM-first: when a provider is enabled, the model answers every question grounded in
+    the full audit context (and the focused function when one is clearly referenced),
+    and out-of-scope questions are declined via the system prompt. The deterministic
+    keyword router below is used only when the LLM is intentionally disabled (mock/off).
     """
-    # Extract intent WITH assessment context
     intent = extract_query_intent(question, assessment)
 
-    # Case 1: Exact match with rule/keyword → proceed to reasoning
+    # --- LLM-first path -----------------------------------------------------
+    if llm_client and getattr(llm_client, "enabled", False):
+        fn = intent.get("function_name")
+        function_context = None
+        # Only attach a focused function on a confident exact-name match, so fuzzy
+        # partial matches (e.g. "Pháp" → "Pay") don't mislabel out-of-scope answers.
+        if fn and intent.get("confidence", 0) >= 100:
+            function_context = find_function_context(assessment, fn, intent.get("rule_id"))
+        try:
+            answer = answer_with_llm(
+                assessment, question, llm_client, conversation_history, function_context
+            )
+        except Exception as exc:
+            # Surface the real model error instead of a generic fallback.
+            provider = llm_client.config.provider if llm_client and llm_client.config else "unknown"
+            print(f"[CHAT ERROR] LLM generate failed (provider={provider}): {exc!r}")
+            return {
+                "answer": (
+                    f"⚠️ Unable to get a response from the AI model "
+                    f"(provider: `{provider}`).\n\n"
+                    f"**Error:** {exc}\n\n"
+                    f"Please check the LLM configuration or try again."
+                ),
+                "query_type": "error",
+                "function_name": fn,
+                "rule_id": intent.get("rule_id"),
+                "error": str(exc),
+                "confidence": 0,
+            }
+        return {
+            "answer": answer,
+            "query_type": "function_deep_dive" if function_context else "assistant",
+            # Only surface a function chip when we actually focused on one.
+            "function_name": function_context.get("method_name") if function_context else None,
+            "rule_id": intent.get("rule_id"),
+            "evidence": (function_context or {}).get("all_evidence", []),
+            "confidence": intent.get("confidence", 0),
+        }
+
+    # --- Deterministic fallback (LLM disabled by config) --------------------
+    # Case 1: Exact match with rule/keyword → focused deterministic explanation
     if intent["is_specific_query"] and intent["function_name"] and intent["confidence"] >= 100:
         context = find_function_context(assessment, intent["function_name"], intent["rule_id"])
         if context:
-            try:
-                answer = reason_about_function(
-                    context, question, intent["rule_id"], llm_client, conversation_history
-                )
-            except Exception as exc:
-                # The model call failed at runtime (bad API key, network/timeout,
-                # CLI error, etc.). Surface the real error instead of returning a
-                # generic fallback that users mistake for a real answer.
-                provider = (
-                    llm_client.config.provider if llm_client and llm_client.config else "unknown"
-                )
-                print(f"[CHAT ERROR] LLM generate failed (provider={provider}): {exc!r}")
-                return {
-                    "answer": (
-                        f"⚠️ Unable to get a response from the AI model "
-                        f"(provider: `{provider}`).\n\n"
-                        f"**Error:** {exc}\n\n"
-                        f"Please check the LLM configuration or try again."
-                    ),
-                    "query_type": "error",
-                    "function_name": intent["function_name"],
-                    "rule_id": intent["rule_id"],
-                    "error": str(exc),
-                    "confidence": 0,
-                }
             return {
-                "answer": answer,
+                "answer": _fallback_function_explanation(context, intent["rule_id"]),
                 "query_type": "function_deep_dive",
                 "function_name": intent["function_name"],
                 "rule_id": intent["rule_id"],
