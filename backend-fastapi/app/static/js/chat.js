@@ -31,6 +31,34 @@ class ChatSession {
         // Enable input and set initial button state
         this.chatInput.disabled = false;
         this.updateInputState();
+
+        // Load persisted chat history for this scan
+        this.loadHistory();
+    }
+
+    async loadHistory() {
+        try {
+            const response = await fetch(`/ui/api/chats/${this.scanId}/messages`, {
+                method: "GET",
+                credentials: "same-origin",
+            });
+            if (!response.ok) return;
+            const data = await response.json();
+            const history = (data && data.messages) || [];
+            if (history.length === 0) return;
+            this.messages = history.map((m) => ({
+                role: m.role,
+                content: m.content,
+                query_type: m.query_type,
+                function_name: m.function_name,
+                rule_id: m.rule_id,
+                confidence: m.confidence || 0,
+            }));
+            this.renderMessages();
+            this.scrollToBottom();
+        } catch (error) {
+            console.error("Failed to load chat history:", error);
+        }
     }
 
     populateExamples() {
@@ -103,7 +131,14 @@ class ChatSession {
             });
 
             if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
+                let detail = `HTTP ${response.status}`;
+                try {
+                    const errBody = await response.json();
+                    if (errBody && errBody.detail) detail = errBody.detail;
+                } catch (_) {
+                    /* response had no JSON body */
+                }
+                throw new Error(detail);
             }
 
             const aiResponse = await response.json();
@@ -184,6 +219,9 @@ class ChatSession {
     createMessageElement(msg) {
         const div = document.createElement("div");
         div.className = `message ${msg.role}-message`;
+        if (msg.query_type === "error") {
+            div.classList.add("error-message");
+        }
 
         if (msg.role === "user") {
             div.innerHTML = `
@@ -221,11 +259,13 @@ class ChatSession {
                 }
             }
 
-            // Handle clarification_needed special case
-            let contentHtml = this.escapeHtml(msg.content);
+            // Assistant content is markdown -> render it (HTML is escaped first, so safe)
+            let contentHtml = this.renderMarkdown(msg.content);
             if (msg.requires_clarification && msg.candidates && msg.candidates.length > 0) {
-                const candidatesList = msg.candidates.map((c) => `• ${this.escapeHtml(c)}`).join("\n");
-                contentHtml += `\n\n${candidatesList}`;
+                contentHtml +=
+                    "<ul class='md-ul'>" +
+                    msg.candidates.map((c) => `<li>${this.escapeHtml(c)}</li>`).join("") +
+                    "</ul>";
             }
 
             div.innerHTML = `
@@ -236,6 +276,130 @@ class ChatSession {
         }
 
         return div;
+    }
+
+    // Minimal, dependency-free markdown -> HTML renderer.
+    // HTML is escaped FIRST, so no raw HTML/script from the model can be injected;
+    // the transforms below only add formatting tags on top of the escaped text.
+    renderMarkdown(src) {
+        if (!src) return "";
+
+        // Pull fenced code blocks out of the RAW source first (keep raw text +
+        // language hint so highlight.js can tokenize them; hljs escapes its own
+        // output, so this stays XSS-safe).
+        const codeBlocks = [];
+        let text = src.replace(/```[ \t]*([\w+-]*)[ \t]*\n?([\s\S]*?)```/g, (_m, lang, code) => {
+            codeBlocks.push({ lang: (lang || "").toLowerCase(), code: code.replace(/\n+$/, "") });
+            return "\nCODEBLOCK" + (codeBlocks.length - 1) + "\n";
+        });
+
+        // Escape everything else so no raw HTML from the model can be injected.
+        text = this.escapeHtml(text);
+
+        const lines = text.split("\n");
+        const out = [];
+        const isTableSep = (l) => l && l.includes("-") && /^\s*\|?[\s:|-]+\|?\s*$/.test(l);
+        let i = 0;
+        while (i < lines.length) {
+            const line = lines[i];
+            const trimmed = line.trim();
+
+            if (/^CODEBLOCK\d+$/.test(trimmed)) { out.push(trimmed); i++; continue; }
+            if (trimmed === "") { i++; continue; }
+
+            // Table: header row followed by a |---|---| separator
+            if (line.includes("|") && i + 1 < lines.length && isTableSep(lines[i + 1])) {
+                const header = this.splitRow(line);
+                i += 2;
+                const rows = [];
+                while (i < lines.length && lines[i].includes("|") && lines[i].trim() !== "") {
+                    rows.push(this.splitRow(lines[i])); i++;
+                }
+                let t = '<table class="md-table"><thead><tr>' +
+                    header.map((c) => "<th>" + this.renderInline(c) + "</th>").join("") +
+                    "</tr></thead><tbody>";
+                t += rows.map((r) => "<tr>" + r.map((c) => "<td>" + this.renderInline(c) + "</td>").join("") + "</tr>").join("");
+                out.push(t + "</tbody></table>");
+                continue;
+            }
+
+            // Headings
+            const h = trimmed.match(/^(#{1,6})\s+(.*)$/);
+            if (h) { const lvl = h[1].length; out.push("<h" + lvl + ' class="md-h">' + this.renderInline(h[2]) + "</h" + lvl + ">"); i++; continue; }
+
+            // Unordered list
+            if (/^\s*[-*+]\s+/.test(line)) {
+                const items = [];
+                while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) {
+                    items.push(this.renderInline(lines[i].replace(/^\s*[-*+]\s+/, ""))); i++;
+                }
+                out.push("<ul class='md-ul'>" + items.map((x) => "<li>" + x + "</li>").join("") + "</ul>");
+                continue;
+            }
+
+            // Ordered list
+            if (/^\s*\d+\.\s+/.test(line)) {
+                const items = [];
+                while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
+                    items.push(this.renderInline(lines[i].replace(/^\s*\d+\.\s+/, ""))); i++;
+                }
+                out.push("<ol class='md-ol'>" + items.map((x) => "<li>" + x + "</li>").join("") + "</ol>");
+                continue;
+            }
+
+            // Paragraph: gather consecutive plain lines
+            const para = [];
+            while (
+                i < lines.length && lines[i].trim() !== "" &&
+                !/^\s*#{1,6}\s/.test(lines[i]) &&
+                !/^\s*[-*+]\s+/.test(lines[i]) &&
+                !/^\s*\d+\.\s+/.test(lines[i]) &&
+                !/^CODEBLOCK\d+$/.test(lines[i].trim()) &&
+                !(lines[i].includes("|") && i + 1 < lines.length && isTableSep(lines[i + 1]))
+            ) {
+                para.push(lines[i]); i++;
+            }
+            if (para.length) out.push("<p>" + this.renderInline(para.join("<br>")) + "</p>");
+        }
+
+        let html = out.join("\n");
+        html = html.replace(/CODEBLOCK(\d+)/g, (_m, n) => this.highlightCode(codeBlocks[+n]));
+        return html
+    }
+
+    // Syntax-highlight a fenced code block with highlight.js (hljs escapes its output).
+    highlightCode(block) {
+        const code = block.code || "";
+        let inner;
+        try {
+            if (window.hljs && block.lang && window.hljs.getLanguage(block.lang)) {
+                inner = window.hljs.highlight(code, { language: block.lang }).value;
+            } else if (window.hljs) {
+                inner = window.hljs.highlightAuto(code).value;
+            } else {
+                inner = this.escapeHtml(code);
+            }
+        } catch (e) {
+            inner = this.escapeHtml(code);
+        }
+        return '<pre class="md-pre"><code class="hljs">' + inner + "</code></pre>";
+    }
+
+    // Inline markdown on already-escaped text: code, bold, italic, links.
+    renderInline(s) {
+        return s
+            .replace(/`([^`]+)`/g, '<code class="md-code">$1</code>')
+            .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+            .replace(/(^|[^*])\*([^*\s][^*]*?)\*/g, "$1<em>$2</em>")
+            .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, t, u) =>
+                /^(https?:\/\/|mailto:|\/)/i.test(u.trim())
+                    ? `<a href="${u}" target="_blank" rel="noopener noreferrer">${t}</a>`
+                    : t
+            );
+    }
+
+    splitRow(line) {
+        return line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
     }
 
     scrollToBottom() {
@@ -257,12 +421,19 @@ class ChatSession {
         }
     }
 
-    clearChat() {
-        if (confirm("Clear chat history? This action cannot be undone.")) {
-            this.messages = [];
-            this.renderMessages();
-            this.chatInput.focus();
+    async clearChat() {
+        if (!confirm("Clear chat history? This action cannot be undone.")) return;
+        try {
+            await fetch(`/ui/api/chats/${this.scanId}/messages`, {
+                method: "DELETE",
+                credentials: "same-origin",
+            });
+        } catch (error) {
+            console.error("Failed to clear chat history:", error);
         }
+        this.messages = [];
+        this.renderMessages();
+        this.chatInput.focus();
     }
 
     escapeHtml(text) {

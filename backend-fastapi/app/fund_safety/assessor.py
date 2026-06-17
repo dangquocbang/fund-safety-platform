@@ -320,17 +320,22 @@ def assess_targets_with_llm(
     source_root: str | None = None,
     batch_size: int = 4,
 ) -> list[TargetAssessment]:
-    """LLM-guided R1-R10 assessment with deterministic fallback.
+    """LLM-guided R1-R10 assessment.
 
     Claude gets only discovered targets + depth evidence, not the whole repo.
-    If output is invalid or provider unavailable, fallback rule assessment is used.
+    The deterministic rule assessment is used ONLY when the provider is
+    intentionally disabled (mock/off). When the provider is enabled but the call
+    fails — or returns unusable/incomplete output — this raises so the scan is
+    reported as a FAILED audit run rather than silently showing a default result.
     """
-    fallback = assess_targets(targets, methods, edges)
+    # When the assessment model is intentionally disabled (mock/off), the
+    # deterministic R1-R10 evaluation is the designed behavior.
     if not getattr(llm_client, "enabled", False) or not targets:
-        return fallback
+        return assess_targets(targets, methods, edges)
+    from .llm import extract_json_object
     by_id = {m.id: m for m in methods}
-    fallback_by_target = {x.target_id: x for x in fallback}
     assessed: list[TargetAssessment] = []
+    covered: set[str] = set()
     base_prompt = _load_prompt("CLAUDE_GO.md") + "\n\n" + _load_prompt("CLAUDE_JAVA.md")
     for start in range(0, len(targets), batch_size):
         batch = targets[start : start + batch_size]
@@ -389,24 +394,33 @@ Assessment rules:
 TARGET_EVIDENCE_JSON:
 {json.dumps(payload_targets, ensure_ascii=False, indent=2)}
 """
+        # A model failure must surface as a FAILED audit run, not be silently
+        # replaced by a deterministic ("default") assessment result.
         try:
             raw = llm_client.generate(prompt, cwd=source_root)
-            from .llm import extract_json_object
-            parsed = extract_json_object(raw) or {}
-            items = parsed.get("assessments") or []
-            item_by_id = {str(x.get("target_id")): x for x in items if isinstance(x, dict)}
-            for t, base in valid_targets:
-                item = item_by_id.get(t.id)
-                if item:
-                    assessed.append(_assessment_from_llm_item(item, t, base))
-                else:
-                    assessed.append(fallback_by_target.get(t.id) or assess_targets([t], methods, edges)[0])
-        except Exception:
-            for t, _ in valid_targets:
-                assessed.append(fallback_by_target.get(t.id) or assess_targets([t], methods, edges)[0])
-    # preserve any target not covered due errors
-    have = {a.target_id for a in assessed}
-    for f in fallback:
-        if f.target_id not in have:
-            assessed.append(f)
+        except Exception as exc:
+            raise RuntimeError(f"Assessment model call failed: {exc}") from exc
+        parsed = extract_json_object(raw)
+        if not isinstance(parsed, dict) or not parsed.get("assessments"):
+            raise RuntimeError(
+                "Assessment model returned no usable JSON assessments; "
+                "aborting the audit instead of reporting a default result."
+            )
+        items = parsed.get("assessments") or []
+        item_by_id = {str(x.get("target_id")): x for x in items if isinstance(x, dict)}
+        for t, base in valid_targets:
+            item = item_by_id.get(t.id)
+            if item:
+                assessed.append(_assessment_from_llm_item(item, t, base))
+                covered.add(t.id)
+    # Every assessable target must be evaluated by the model. If it under-covered,
+    # surface that instead of backfilling rows with heuristic defaults.
+    assessable_ids = {t.id for t in targets if t.method_id in by_id}
+    missing = sorted(assessable_ids - covered)
+    if missing:
+        preview = ", ".join(missing[:10]) + ("…" if len(missing) > 10 else "")
+        raise RuntimeError(
+            f"Assessment model did not return results for {len(missing)} "
+            f"target(s): {preview}"
+        )
     return assessed

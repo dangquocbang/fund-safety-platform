@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from .auth import current_user, require_min_role, require_role, verify_password, create_access_token, seed_demo_users, hash_password, user_from_token
-from .db import init_db, get_session, Project, ScanJob, FindingRecord, User
+from .db import init_db, get_session, Project, ScanJob, FindingRecord, User, ChatMessageRecord
 from .scan_service import extract_zip, run_scan_job
 from .delete_service import delete_scan, delete_project, purge_all_data, get_admin_stats
 from .chat_service import chat_with_reasoning
@@ -498,12 +498,14 @@ def ui_dashboard(request: Request, s: Session = Depends(get_session)):
     dashboard = risk_dashboard(user, s)
     scans_all = s.exec(select(ScanJob).order_by(ScanJob.created_at.desc()).limit(20)).all()
     scans_visible = [j for j in scans_all if can_view_scan(user, j, s)]
+    project_names = {p.id: p.name for p in s.exec(select(Project)).all()}
     return templates.TemplateResponse(request, "dashboard.html", {
         "request": request,
         "user": user,
         "projects": visible_projects,
         "dashboard": dashboard,
         "scans": scans_visible,
+        "project_names": project_names,
     })
 
 
@@ -636,10 +638,123 @@ def ui_chat_page(scan_id: int, request: Request, s: Session = Depends(get_sessio
         },
     )
 
-@app.post("/api/chats/{scan_id}/messages")
-def api_chat_message(
+def _load_chat_history(s: Session, scan_id: int, user_id: int | None) -> list[dict]:
+    """Load persisted chat turns for a scan + user, oldest first."""
+    rows = s.exec(
+        select(ChatMessageRecord)
+        .where(ChatMessageRecord.scan_id == scan_id)
+        .where(ChatMessageRecord.user_id == user_id)
+        .order_by(ChatMessageRecord.id)
+    ).all()
+    return [
+        {
+            "role": r.role,
+            "content": r.content,
+            "query_type": r.query_type,
+            "function_name": r.function_name,
+            "rule_id": r.rule_id,
+            "confidence": r.confidence,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in rows
+    ]
+
+
+def _save_chat_message(
+    s: Session,
+    scan_id: int,
+    user_id: int | None,
+    role: str,
+    content: str,
+    query_type: str | None = None,
+    function_name: str | None = None,
+    rule_id: str | None = None,
+    confidence: int | None = None,
+) -> None:
+    s.add(ChatMessageRecord(
+        scan_id=scan_id,
+        user_id=user_id,
+        role=role,
+        content=content,
+        query_type=query_type,
+        function_name=function_name,
+        rule_id=rule_id,
+        confidence=confidence,
+    ))
+    s.commit()
+
+
+def _handle_chat_message(
     scan_id: int,
     body: ChatMessage,
+    user: User,
+    s: Session,
+    stage: str,
+) -> dict:
+    """Shared chat handler: validate, load history, reason, persist."""
+    job = s.get(ScanJob, scan_id)
+    if not job or not job.report_dir:
+        raise HTTPException(404, "scan not found")
+    if not can_view_scan(user, job, s):
+        raise HTTPException(403, "not allowed")
+
+    assessment_path = Path(job.report_dir) / "assessment.json"
+    if not assessment_path.exists():
+        raise HTTPException(404, "assessment not found")
+
+    assessment = json.loads(assessment_path.read_text())
+
+    llm_client = LLMClient.for_stage(stage) if LLM_ENABLED else None
+
+    # Persisted history is the source of truth for multi-turn context.
+    history = _load_chat_history(s, scan_id, user.id)
+
+    result = chat_with_reasoning(assessment, body.question, llm_client, conversation_history=history)
+
+    # Persist the turn only when it succeeded. On a model error we save nothing
+    # (neither question nor reply) so a failed turn leaves no trace and the user
+    # can retry cleanly without an orphan question polluting history/context.
+    if result.get("query_type") != "error":
+        _save_chat_message(s, scan_id, user.id, "user", body.question)
+        _save_chat_message(
+            s, scan_id, user.id, "assistant", result["answer"],
+            query_type=result.get("query_type"),
+            function_name=result.get("function_name"),
+            rule_id=result.get("rule_id"),
+            confidence=result.get("confidence", 0),
+        )
+
+    return {
+        "answer": result["answer"],
+        "content": result["answer"],
+        "query_type": result["query_type"],
+        "function_name": result.get("function_name"),
+        "rule_id": result.get("rule_id"),
+        "confidence": result.get("confidence", 0),
+        "requires_clarification": result.get("requires_clarification", False),
+        "candidates": result.get("candidates", []),
+        "error": result.get("error"),
+    }
+
+
+@app.get("/ui/api/chats/{scan_id}/messages")
+def ui_api_chat_history(
+    scan_id: int,
+    request: Request,
+    s: Session = Depends(get_session),
+):
+    user = _require_ui_user(request, s)
+    job = s.get(ScanJob, scan_id)
+    if not job or not job.report_dir:
+        raise HTTPException(404, "scan not found")
+    if not can_view_scan(user, job, s):
+        raise HTTPException(403, "not allowed")
+    return {"messages": _load_chat_history(s, scan_id, user.id)}
+
+
+@app.get("/api/chats/{scan_id}/messages")
+def api_chat_history(
+    scan_id: int,
     user: User = Depends(current_user),
     s: Session = Depends(get_session),
 ):
@@ -648,29 +763,41 @@ def api_chat_message(
         raise HTTPException(404, "scan not found")
     if not can_view_scan(user, job, s):
         raise HTTPException(403, "not allowed")
+    return {"messages": _load_chat_history(s, scan_id, user.id)}
 
-    assessment_path = Path(job.report_dir) / "assessment.json"
-    if not assessment_path.exists():
-        raise HTTPException(404, "assessment not found")
 
-    assessment = json.loads(assessment_path.read_text())
+@app.delete("/ui/api/chats/{scan_id}/messages")
+def ui_api_chat_clear(
+    scan_id: int,
+    request: Request,
+    s: Session = Depends(get_session),
+):
+    user = _require_ui_user(request, s)
+    job = s.get(ScanJob, scan_id)
+    if not job or not job.report_dir:
+        raise HTTPException(404, "scan not found")
+    if not can_view_scan(user, job, s):
+        raise HTTPException(403, "not allowed")
+    rows = s.exec(
+        select(ChatMessageRecord)
+        .where(ChatMessageRecord.scan_id == scan_id)
+        .where(ChatMessageRecord.user_id == user.id)
+    ).all()
+    for r in rows:
+        s.delete(r)
+    s.commit()
+    return {"deleted": len(rows)}
 
-    # Get LLM client for function reasoning
-    llm_client = LLMClient.for_stage("assessment") if LLM_ENABLED else None
 
-    # Use enhanced chat with function-level reasoning
-    result = chat_with_reasoning(assessment, body.question, llm_client)
+@app.post("/api/chats/{scan_id}/messages")
+def api_chat_message(
+    scan_id: int,
+    body: ChatMessage,
+    user: User = Depends(current_user),
+    s: Session = Depends(get_session),
+):
+    return _handle_chat_message(scan_id, body, user, s, stage="assessment")
 
-    return {
-        "answer": result["answer"],
-        "content": result["answer"],
-        "query_type": result["query_type"],
-        "function_name": result.get("function_name"),
-        "rule_id": result.get("rule_id"),
-        "confidence": result.get("confidence", 0),
-        "requires_clarification": result.get("requires_clarification", False),
-        "candidates": result.get("candidates", []),
-    }
 
 @app.post("/ui/api/chats/{scan_id}/messages")
 def ui_api_chat_message(
@@ -679,39 +806,8 @@ def ui_api_chat_message(
     request: Request,
     s: Session = Depends(get_session),
 ):
-    # Cookie-based authentication for web UI
     user = _require_ui_user(request, s)
-
-    # Load and validate scan
-    job = s.get(ScanJob, scan_id)
-    if not job or not job.report_dir:
-        raise HTTPException(404, "scan not found")
-    if not can_view_scan(user, job, s):
-        raise HTTPException(403, "not allowed")
-
-    # Load assessment
-    assessment_path = Path(job.report_dir) / "assessment.json"
-    if not assessment_path.exists():
-        raise HTTPException(404, "assessment not found")
-
-    assessment = json.loads(assessment_path.read_text())
-
-    # Get LLM client for chat reasoning (uses dedicated chat config)
-    llm_client = LLMClient.for_stage("chat") if LLM_ENABLED else None
-
-    # Use enhanced chat with function-level reasoning
-    result = chat_with_reasoning(assessment, body.question, llm_client)
-
-    return {
-        "answer": result["answer"],
-        "content": result["answer"],
-        "query_type": result["query_type"],
-        "function_name": result.get("function_name"),
-        "rule_id": result.get("rule_id"),
-        "confidence": result.get("confidence", 0),
-        "requires_clarification": result.get("requires_clarification", False),
-        "candidates": result.get("candidates", []),
-    }
+    return _handle_chat_message(scan_id, body, user, s, stage="chat")
 
 @app.get("/ui/scans/{scan_id}/assessment-report", response_class=HTMLResponse)
 def ui_assessment_report(scan_id: int, request: Request, s: Session = Depends(get_session)):

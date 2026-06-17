@@ -203,12 +203,21 @@ class LLMClient:
                 {"role": "system", "content": system},
                 {"role": "user", "content": prompt},
             ],
-            "temperature": 0,
         }
+        # Only send temperature when explicitly configured. Some models (e.g. the
+        # gpt-5 family) reject temperature=0 and only allow their default, so we
+        # omit it unless the provider config opts in.
+        temperature = cfg.get("temperature")
+        if temperature is not None:
+            payload["temperature"] = temperature
         headers = {"authorization": f"Bearer {api_key}", "content-type": "application/json"}
         with httpx.Client(timeout=self.config.timeout_seconds) as client:
             r = client.post(base_url + "/chat/completions", headers=headers, json=payload)
-            r.raise_for_status()
+            if r.status_code >= 400:
+                # Surface the provider's error body (it explains *why* it failed)
+                # instead of httpx's generic status message.
+                detail = r.text.strip()
+                raise LLMUnavailable(f"{r.status_code} from {base_url}: {detail[:500]}")
             data = r.json()
         return data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
 

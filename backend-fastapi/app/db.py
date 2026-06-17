@@ -51,6 +51,18 @@ class FindingRecord(SQLModel, table=True):
     review_note: str | None = None
     reviewed_at: datetime | None = None
 
+class ChatMessageRecord(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    scan_id: int = Field(index=True)
+    user_id: int | None = Field(default=None, index=True)
+    role: str  # 'user' or 'assistant'
+    content: str
+    query_type: str | None = None
+    function_name: str | None = None
+    rule_id: str | None = None
+    confidence: int | None = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 engine = create_engine(DATABASE_URL, echo=False, connect_args=connect_args)
 
